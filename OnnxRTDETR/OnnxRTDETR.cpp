@@ -8,9 +8,11 @@
 
 int main()
 {
-	std::string modelPath0 = "./assets/yolov8n.onnx";
+	float confidence = 0.45;	// 后处理中的置信度阈值
+
+	std::string modelPath0 = "./assets/rtdetr-l.onnx";
 	std::wstring modelPath = std::wstring(modelPath0.begin(), modelPath0.end());
-	std::string imagePath = "./assets/1.jpg";
+	std::string imagePath = "./assets/5.jpg";
 
 	std::cout << "Model Path: " << modelPath0 << std::endl;
 	std::cout << "Image Path: " << imagePath << std::endl;
@@ -87,21 +89,22 @@ int main()
 
 	// 获取输出节点的信息
 	int numBatch = 0;
-	int numPredictions = 0;
+	int numQuery = 0;
 	int numAttributes = 0;
 
-	//for (int i = 0; i < output_nodes_num; i++) {
-	for (int i = 0; i < 1; i++) {
+	for (int i = 0; i < output_nodes_num; i++) {
+		//for (int i = 0; i < 1; i++) {
 		auto output_name = session_.GetOutputNameAllocated(i, allocator);
 		output_node_names.push_back(output_name.get());
 
-		// YOLOv5[1, 25200, 85]: (85 = 4 (bbox) + 1 (confidence) + 80 (class scores))
-		// YOLOv8[1, 84, 8400]: (84 = 4 (bbox) + 80 (class scores))
+		// YOLOv5: [batch_size, num_predictions, num_attributes]: [1, 25200, 85]: (85 = 4 (bbox) + 1 (confidence) + 80 (class scores))
+		// YOLOv8: [batch_size, num_attributes, num_predictions]: [1, 84, 8400]: (84 = 4 (bbox) + 80 (class scores))
+		// RTDETR: [batch_size, num_Query, num_attributes]: [1, 300, 84]
 		auto outShapeInfo = session_.GetOutputTypeInfo(i).GetTensorTypeAndShapeInfo().GetShape();
 		numBatch = outShapeInfo[0];
-		numAttributes = outShapeInfo[1];
-		numPredictions = outShapeInfo[2];
-		std::cout << "output format: " << numBatch << "x" << numAttributes << "x" << numPredictions << std::endl;
+		numQuery = outShapeInfo[1];
+		numAttributes = outShapeInfo[2];
+		std::cout << "output format: " << numBatch << "x" << numQuery << "x" << numAttributes << std::endl;
 	}
 
 	cv::Mat srcImage = cv::imread(imagePath);
@@ -148,13 +151,13 @@ int main()
 
 	const float* pdata = ort_outputs[0].GetTensorMutableData<float>();
 
-	// Yolov8: [batch_size, num_attributes, num_predictions]
+	// RTDETR: [batch_size, num_Query, num_attributes]
 	// num_attributes: 每个框的属性数量 (例如 84 = cx, cy, w, h, , class_score1, class_score2, ...)
-	cv::Mat det_output0(numAttributes, numPredictions, CV_32F, (float*)pdata);
+	cv::Mat det_output(numQuery, numAttributes, CV_32F, (float*)pdata);
 
-	// 转置，方便后续处理
-	cv::Mat det_output;
-	cv::transpose(det_output0, det_output);
+	//// 转置，方便后续处理。YOLOv8的输出需要此操作。
+	//cv::Mat det_output;
+	//cv::transpose(det_output0, det_output);
 
 	std::vector<cv::Rect> boxes;		// 目标框的坐标位置
 	std::vector<float> confidences;		// 目标框的置信度
@@ -162,11 +165,12 @@ int main()
 
 	// 遍历所有检测到的候选框 (det_output的每一行代表一个候选框)
 	for (int i = 0; i < det_output.rows; i++) {
+		//YOLOv5需要先进行阈值筛选
 		//float confidence = det_output.at<float>(i, 4);
 		//if (confidence < 0.45) {
 		//	continue;
 		//}
-		
+
 		// 获得当前目标框的所有类别得分
 		cv::Mat classes_scores = det_output.row(i).colRange(4, numAttributes);
 
@@ -174,14 +178,15 @@ int main()
 		double score;				// 用于存储分类中的得分最大值
 		minMaxLoc(classes_scores, 0, &score, 0, &classIdPoint);
 		// 处理分类得分较高的目标框
-		if (score > 0.25)
+		if (score > confidence)
 		{
-			// 计算在原始图像上,目标框的中心点坐标和宽高
+			// 计算在原始图像上,锚框的中心点坐标和宽高
 			// 在输入图像上目标框的中心点坐标和宽高
-			float cx = det_output.at<float>(i, 0);
-			float cy = det_output.at<float>(i, 1);
-			float ow = det_output.at<float>(i, 2);
-			float oh = det_output.at<float>(i, 3);
+			// 注意，RTDETR输出的坐标是比例形式，需用模型输入尺寸进行抓换；YOLO输出的坐标是像素形式
+			float cx = det_output.at<float>(i, 0) * input_w;
+			float cy = det_output.at<float>(i, 1) * input_h;
+			float ow = det_output.at<float>(i, 2) * input_w;
+			float oh = det_output.at<float>(i, 3) * input_h;
 			//原始图像上目标框的左上角坐标
 			int x = static_cast<int>((cx - 0.5 * ow) * x_factor);
 			int y = static_cast<int>((cy - 0.5 * oh) * y_factor);
@@ -202,13 +207,7 @@ int main()
 		}
 	}
 
-	// NMS:非极大值抑制，去除同一目标的多余结果。
-	std::vector<int> indexes;	// 存储经过 NMS 后保留的目标框在 boxes 向量中的索引
-	if (!boxes.empty()) {
-		cv::dnn::NMSBoxes(boxes, confidences, 0.25f, 0.45f, indexes);
-	}
-	std::cout << "get " << indexes.size() << " boxes after NMS." << std::endl;
-
+	// 数据集标签名字
 	std::vector<std::string> labels =
 	{ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
 	"10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
@@ -219,13 +218,25 @@ int main()
 	"60", "61", "62", "63", "64", "65", "66", "67", "68", "69",
 	"70", "71", "72", "73", "74", "75", "76", "77", "78", "79" };
 
-	// 遍历筛选出的目标框
-	for (size_t i = 0; i < indexes.size(); i++) {
-		int idx = indexes[i];		// 获取当前目标框序号
-		int cid = classIds[idx];	// 获取目标框分类得分
-		cv::rectangle(srcImage, boxes[idx], cv::Scalar(0, 0, 255), 1, 8, 0);
-		cv::putText(srcImage, labels[cid].c_str(), boxes[idx].br(), cv::FONT_HERSHEY_SIMPLEX, 2, cv::Scalar(255, 0, 0), 1, cv::LINE_AA);
+	// 遍历输出的目标框
+	for (int i = 0; i < boxes.size(); i++) {
+		// 获取判定的类别
+		int cId = classIds[i];
+		std::string label = labels[cId];
+		// 获取评分
+		auto conf = confidences[i];
+		std::ostringstream oss;
+		oss << std::fixed << std::setprecision(2) << conf;
+		std::string confStr = oss.str();
+		std::string text = label + ":" + confStr;
+
+		// 获取预测矩形框
+		auto box = boxes[i];
+
+		cv::rectangle(srcImage, box, cv::Scalar(0, 0, 255), 1, 8, 0);
+		cv::putText(srcImage, text.c_str(), box.br(), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(255, 0, 0), 1);
 	}
+	std::cout << "Get " << boxes.size() << " boxes" << std::endl;
 
 	cv::imshow("DetectResult", srcImage);
 	cv::waitKey(0);

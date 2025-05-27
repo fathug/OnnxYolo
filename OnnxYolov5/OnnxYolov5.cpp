@@ -198,7 +198,7 @@ int main()
 		// 处理分类得分较高的目标框
 		if (score > 0.25)
 		{
-			// 计算在原始图像上,目标框的左上角坐标和宽高
+			// 计算在原始图像上,目标框的中心点坐标和宽高
 			// 在输入图像上目标框的中心点坐标和宽高
 			float cx = det_output.at<float>(i, 0);
 			float cy = det_output.at<float>(i, 1);
