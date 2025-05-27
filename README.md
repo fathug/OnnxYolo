@@ -1,4 +1,4 @@
-C++实现基于ONNXRuntime的完整推理流程，可使用模型有YOLOv5、YOLOv8等。
+C++实现ONNXRuntime平台的完整推理流程，可使用模型有YOLOv5、YOLOv8、RT-DETR等。
 
 本程序可运行在任何电脑上，显卡是非必要的，内含详细代码注释。
 
