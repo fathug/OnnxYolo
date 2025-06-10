@@ -1,6 +1,7 @@
 ﻿#include <iostream>
 #include <string>
 #include <fstream>
+#include <chrono>
 
 #include "onnxruntime_cxx_api.h"
 #include "opencv2/opencv.hpp"
@@ -136,6 +137,8 @@ int main()
 	const std::array<const char*, 1> inputNames = { input_node_names[0].c_str() };
 	const std::array<const char*, 1> outNames = { output_node_names[0].c_str() };
 
+	auto inferenceStart = std::chrono::high_resolution_clock::now();
+
 	// 执行推理
 	std::vector<Ort::Value> ort_outputs;
 	try {
@@ -145,6 +148,8 @@ int main()
 		std::cout << e.what() << std::endl;
 		return 1;
 	}
+
+	auto inferenceEnd = std::chrono::high_resolution_clock::now();
 
 	const float* pdata = ort_outputs[0].GetTensorMutableData<float>();
 
@@ -228,6 +233,11 @@ int main()
 	}
 
 	cv::imshow("DetectResult", srcImage);
+	cv::imwrite("./assets/output.jpg", srcImage);
+
+	auto inference_duration = std::chrono::duration_cast<std::chrono::milliseconds>(inferenceEnd - inferenceStart).count();
+	std::cout << modelPath0 << "模型推理耗时: " << inference_duration << " ms" << std::endl;
+
 	cv::waitKey(0);
 
 	// 释放资源
