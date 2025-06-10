@@ -1,4 +1,4 @@
-C++实现ONNXRuntime平台的完整推理流程，可使用模型有YOLOv5、YOLOv8、RT-DETR等。
+C++实现ONNXRuntime平台的完整推理流程，可使用模型有YOLOv5、YOLOv8、YOLO11、RT-DETR等。
 
 本程序可运行在任何电脑上，显卡是非必要的，内含详细代码注释。
 
@@ -53,3 +53,7 @@ VisualStudio2022（C++开发环境），OpenCV 4.8.0，onnxruntime-gpu-1.17.3，
 5.在OnnxYolov5.cpp的同级目录下新建assets文件夹，内部放入自己的 .onnx 模型文件以及图片。
 
 6.编译执行。
+
+#### 3.模型说明
+
+YOLOv8、YOLO11的输出节点的信息结构是一致的，所以支持YOLOv8模型推理的程序，可以兼容YOLO11模型。在这两个模型之间切换，只需要更换所使用的模型路径即可。
