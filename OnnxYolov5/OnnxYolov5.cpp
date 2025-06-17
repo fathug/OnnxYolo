@@ -67,6 +67,7 @@ int main()
 	Ort::AllocatorWithDefaultOptions allocator;
 
 	// 获取输入节点的信息
+	int input_b = 0;
 	int input_c = 0;
 	int input_h = 0;
 	int input_w = 0;
@@ -81,6 +82,7 @@ int main()
 		// 获取当前节点的输入形状
 		// GetTensorTypeAndShapeInfo(): 从类型信息中获取张量类型和形状信息。GetShape(): 获取张量的形状，返回一个 std::vector<int64_t>。
 		auto inputShapeInfo = session_.GetInputTypeInfo(i).GetTensorTypeAndShapeInfo().GetShape();
+		input_b = inputShapeInfo[0];
 		input_c = inputShapeInfo[1];
 		input_h = inputShapeInfo[2];
 		input_w = inputShapeInfo[3];
@@ -150,6 +152,32 @@ int main()
 	// // Run 方法需要输入和输出节点名称的 C 风格字符串数组。模型是这种类型的数组
 	const std::array<const char*, 1> inputNames = { input_node_names[0].c_str() };
 	const std::array<const char*, 1> outNames = { output_node_names[0].c_str() };
+
+	// 假的输入张量，用于模型预热。与模型输入尺寸、类型一致即可
+	// 假张量适用于没有图用于预热的情况，有图的情况下可使用 input_tensor_ 进行预热
+	size_t dummy_input_size = static_cast<size_t>(input_b) * input_c * input_h * input_w;
+	std::vector<float> dummy_input_data(dummy_input_size, 0.0f);
+	std::array<int64_t, 4> dummy_input_shape{ input_b, input_c, input_h, input_w };
+	auto dummy_allocator_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
+	Ort::Value dummy_input_tensor = Ort::Value::CreateTensor<float>(
+		dummy_allocator_info,
+		dummy_input_data.data(),
+		dummy_input_data.size(),
+		dummy_input_shape.data(),
+		dummy_input_shape.size());
+
+	// 模型预热
+	std::cout << "\n模型正在预热 (Warm-up)..." << std::endl;
+	for (int i = 0; i < 3; ++i) {	// 执行3次以上，后续一次推理速度会比较稳定
+		try {
+			session_.Run(Ort::RunOptions{ nullptr }, inputNames.data(), &dummy_input_tensor, 1, outNames.data(), outNames.size());
+		}
+		catch (const std::exception& e) {
+			std::cerr << "预热出错: " << e.what() << std::endl;
+			return 1;
+		}
+	}
+	std::cout << "预热完成.\n" << std::endl;
 
 	auto inferenceStart = std::chrono::high_resolution_clock::now();
 
